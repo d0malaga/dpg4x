@@ -2,11 +2,12 @@ import { Component, OnInit, OnDestroy, Output, EventEmitter } from '@angular/cor
 import { CommonModule } from '@angular/common';
 import { ApiService } from '../services/api';
 import { Subscription } from 'rxjs';
+import { ProgressComponent } from './progress';
 
 @Component({
   selector: 'app-file-browser',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, ProgressComponent],
   template: `
     <div class="file-browser-container">
       <div class="browser-section">
@@ -15,7 +16,7 @@ import { Subscription } from 'rxjs';
           <span class="current-path">{{ currentPath }}</span>
           <div class="upload-actions">
             <input type="file" #fileInput (change)="onUploadSelected($event)" style="display: none">
-            <button (click)="fileInput.click()" [disabled]="uploadingFile">
+            <button (click)="$event.stopPropagation(); fileInput.click()" [disabled]="uploadingFile">
               {{ uploadingFile ? 'Uploading...' : 'Upload File' }}
             </button>
           </div>
@@ -33,6 +34,8 @@ import { Subscription } from 'rxjs';
       </div>
 
       <div class="info-section">
+        <app-progress [selectedFile]="selectedFile"></app-progress>
+
         <div class="dpg-info" *ngIf="dpgInfo; else noDpg">
           <h3>DPG Info</h3>
           <div class="metadata">
@@ -74,8 +77,19 @@ import { Subscription } from 'rxjs';
           </div>
         </div>
         <ng-template #noDpg>
-          <div class="no-selection">
-            <p>{{ selectedFile ? 'Not a DPG file' : 'Select a file to see details' }}</p>
+          <div class="no-selection" *ngIf="!selectedFile">
+            <p>Select a file to see details</p>
+          </div>
+          <div class="conversion-section" *ngIf="selectedFile && !dpgInfo">
+             <div class="selected-header">
+                <h3>Selected: {{ selectedFile.split('/').pop() }}</h3>
+             </div>
+             <div class="conversion-actions">
+                <p>Convert this file to DPG format for playback.</p>
+                <button class="convert-btn" (click)="startConversion()">
+                  Convert to DPG
+                </button>
+             </div>
           </div>
         </ng-template>
       </div>
@@ -115,6 +129,13 @@ import { Subscription } from 'rxjs';
     .preview-btn { width: 100%; padding: 10px; background: #2196f3; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500; }
     .preview-btn:hover { background: #1976d2; }
     
+    .conversion-section { padding: 10px; }
+    .selected-header h3 { margin: 0 0 15px 0; font-size: 1.1em; color: #333; word-break: break-all; }
+    .conversion-actions { background: white; padding: 20px; border-radius: 8px; border: 1px solid #eee; }
+    .conversion-actions p { margin: 0 0 20px 0; color: #666; font-size: 0.9em; }
+    .convert-btn { width: 100%; padding: 12px; background: #4caf50; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: 600; font-size: 1em; transition: background 0.2s; }
+    .convert-btn:hover { background: #388e3c; }
+
     .no-selection { height: 100%; display: flex; align-items: center; justify-content: center; color: #999; font-style: italic; }
     
     .error { color: #d32f2f; font-size: 0.85em; margin-top: 5px; }
@@ -157,7 +178,7 @@ export class FileBrowserComponent implements OnInit, OnDestroy {
 
     // Listen for file refresh requests
     this.refreshSub = this.api.refreshFiles$.subscribe(() => {
-      this.loadFiles(this.currentPath);
+      this.loadFiles(this.currentPath, true);
     });
   }
 
@@ -167,17 +188,29 @@ export class FileBrowserComponent implements OnInit, OnDestroy {
     }
   }
 
-  loadFiles(path?: string) {
+  loadFiles(path?: string, preserveSelection: boolean = false) {
     this.api.listFiles(path).subscribe({
       next: (data) => {
         this.currentPath = data.current_path;
         this.parentPath = data.parent_path;
         this.rootPath = data.root_path; // Capture (new) root path from backend
         this.items = data.items;
-        this.selectedFile = null;
-        this.dpgInfo = null;
-        this.resetPreview();
-        this.resetThumbnail();
+
+        if (!preserveSelection) {
+          this.selectedFile = null;
+          this.dpgInfo = null;
+          this.resetPreview();
+          this.resetThumbnail();
+        } else if (this.selectedFile) {
+          // If preserving selection, we might want to refresh dpgInfo if the file still exists
+          const stillExists = this.items.some(item => item.path === this.selectedFile);
+          if (!stillExists) {
+            this.selectedFile = null;
+            this.dpgInfo = null;
+            this.resetPreview();
+            this.resetThumbnail();
+          }
+        }
       },
       error: (err) => console.error('Failed to load files', err)
     });
@@ -288,6 +321,17 @@ export class FileBrowserComponent implements OnInit, OnDestroy {
 
   getDownloadUrl(path: string): string {
     return this.api.getDownloadUrl(path);
+  }
+
+  startConversion() {
+    if (!this.selectedFile) return;
+    this.api.convert(this.selectedFile).subscribe({
+      next: () => {
+        // The ProgressComponent already listens for status changes
+        // No need for extra feedback here besides the conversion starting
+      },
+      error: (err) => alert('Failed to start conversion: ' + (err.error?.error || err.message))
+    });
   }
 
   generatePreview() {
