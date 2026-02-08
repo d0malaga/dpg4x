@@ -26,7 +26,7 @@ def _resolve_and_validate(path):
 
     # Remove WORK_DIR from path to make it relative to WORK_DIR
     # and be able to use safe_join
-    safe_path = safe_join(WORK_DIR, path.replace(work_dir_abs))
+    safe_path = safe_join(WORK_DIR, path.replace(work_dir_abs + os.sep, ""))
         
     if not safe_path:
         return None
